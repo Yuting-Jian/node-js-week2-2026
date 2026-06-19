@@ -28,6 +28,11 @@ const { formidable } = require('formidable');  // formidable v3 用 named import
 function getUploadConfig() {
   // TODO: 實作此函式
   // 提示：用 || 給預設值；MAX_FILE_SIZE_MB 是字串，記得先 Number() 轉型再換算 bytes
+  return {
+    uploadDir: process.env.UPLOAD_DIR || '/tmp',
+    maxFileSize: (process.env.MAX_FILE_SIZE_MB ? Number(process.env.MAX_FILE_SIZE_MB) : 5) * 1024 * 1024,
+    gymName: process.env.GYM_NAME || '未命名健身房'
+  }
 }
 
 // ========== 任務二：取副檔名 ==========
@@ -51,6 +56,8 @@ function getUploadConfig() {
 function getFileExtension(filename) {
   // TODO: 實作此函式
   // 提示：用 lastIndexOf('.') 找最後一個 .，toLowerCase() 轉小寫
+  const index = filename.lastIndexOf('.')
+  return index === -1 ? '' : filename.slice(index, filename.length).toLowerCase()
 }
 
 // ========== 任務三：解析檔案 metadata ==========
@@ -76,6 +83,12 @@ function getFileExtension(filename) {
 function parseFileMetadata(file) {
   // TODO: 實作此函式
   // 提示：呼叫 getFileExtension 取副檔名，Math.round(size / 1024) 算 KB
+  return {
+    filename: file.originalFilename, 
+    sizeKB: Math.round(file.size / 1024), 
+    ext: getFileExtension(file.originalFilename)
+  }
+
 }
 
 // ========== 任務四：產出 upload log 字串 ==========
@@ -98,6 +111,7 @@ function parseFileMetadata(file) {
 function formatUploadLog(meta, config) {
   // TODO: 實作此函式
   // 提示：用 template literal 組字串
+  return `[${config.gymName}] Uploaded ${meta.filename} (${meta.sizeKB} KB) → ${config.uploadDir}` 
 }
 
 // ========== 任務五：路由分派 ==========
@@ -125,7 +139,7 @@ function formatUploadLog(meta, config) {
  *   // 在 createUploadServer 裡：
  *   http.createServer((req, res) => router(req, res, config))
  */
-function router(req, res, config) {
+async function router(req, res, config) {
   // TODO: 實作此函式
   // 建議（非強制）：
   //   - 拆出 handleUpload(req, res, config)：formidable 解析邏輯
@@ -135,6 +149,68 @@ function router(req, res, config) {
   //   - 超過 maxFileSize 時 formidable v3 發 'error' event，要用 form.on('error', ...) 接
   //   - 同時 form.parse 的 callback err 也要處理
   //   - 避免重複 res.writeHead（檢查 res.headersSent）
+  const header = {
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
+      'Content-Type': 'application/json'
+  }
+
+  if(req.url === '/coaches/avatar' && req.method === 'POST'){
+    const { uploadDir, maxFileSize, gymName } = config
+    const form = formidable({
+      uploadDir,
+      maxFileSize,
+      keepExtensions: true
+    })
+    form.on('error',(e)=>{
+      if(res.headersSent) return
+
+      res.writeHead(500, header)
+      res.write(JSON.stringify({ error:e }))
+      res.end()
+    })
+
+    try{
+      const [fields, files] = await form.parse(req)
+      const hasFile = files.file && files.file.length > 0 && files.file[0].size > 0;
+      if(!hasFile){
+        const noFileErr = new Error('No file uploaded');
+        noFileErr.code = 'NO_FILE_ERR'; 
+        throw noFileErr;
+      }
+
+      const file = files.file[0]
+
+      res.writeHead(200, header)
+      const metadata = parseFileMetadata(file)
+      res.write(
+        JSON.stringify({
+          ...metadata,
+          savedPath: config.uploadDir
+        })
+      )
+      res.end()
+
+    }catch(e){
+      if(res.headersSent) return
+
+      if(e.code === 'NO_FILE_ERR'){
+        res.writeHead(400, header)
+        res.write(JSON.stringify({ error: e.message }))
+        res.end()
+      }else{
+        res.writeHead(400, header)
+        res.write(JSON.stringify({ error:e }))
+        res.end()
+      }
+    }
+  }else{
+    res.writeHead(404, header)
+    res.write(JSON.stringify({ error: 'Not Found' }))
+    res.end()
+  }
+
 }
 
 // ========== 任務六：建立上傳 server ==========
@@ -156,6 +232,7 @@ function router(req, res, config) {
 function createUploadServer(config) {
   // TODO: 實作此函式
   // 提示：主邏輯都在 router 裡，這邊函式內容不多
+  return http.createServer((req, res)=> router(req, res, config))
 }
 
 module.exports = {
