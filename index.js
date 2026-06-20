@@ -232,6 +232,7 @@ async function router(req, res, config) {
 function createUploadServer(config) {
   // TODO: 實作此函式
   // 提示：主邏輯都在 router 裡，這邊函式內容不多
+  fs.mkdirSync(uploadDir, { recursive: true })
   return http.createServer((req, res)=> router(req, res, config))
 }
 
